@@ -18,6 +18,8 @@ import { MessageButtons } from './Buttons';
 import { MessageContent } from './Content';
 import Step from './Step';
 import UserMessage from './UserMessage';
+import AssistantMessage from './AssistantMessage';
+
 
 interface Props {
   message: IStep;
@@ -154,7 +156,8 @@ const Message = memo(
                   ) : (
                     // Display an assistant message
                     <div className="flex flex-col items-start min-w-[150px] flex-grow gap-2">
-                      <MessageContent
+                      <AssistantMessage
+                      // <MessageContent
                         ref={contentRef}
                         elements={elements}
                         message={message}
