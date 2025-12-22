@@ -19,6 +19,7 @@ import { MessageContent } from './Content';
 import Step from './Step';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
+import StepMessage from './StepMessage';
 
 
 interface Props {
@@ -116,49 +117,18 @@ const Message = memo(
                   ) : null}
                   {/* Display the step and its children */}
                   {isStep ? (
-                    <Step step={message} isRunning={isRunning}>
-                      {showInputSection ? (
-                        <MessageContent
-                          elements={elements}
-                          message={message}
-                          allowHtml={allowHtml}
-                          latex={latex}
-                          sections={['input']}
-                        />
-                      ) : null}
-                      {message.steps ? (
-                        <Messages
-                          messages={message.steps.filter(
-                            (s) => !s.type.includes('message')
-                          )}
-                          elements={elements}
-                          actions={actions}
-                          indent={indent + 1}
-                          isRunning={isRunning}
-                        />
-                      ) : null}
-                      {shouldRenderOutput ? (
-                        <MessageContent
-                          ref={contentRef}
-                          elements={elements}
-                          message={message}
-                          allowHtml={allowHtml}
-                          latex={latex}
-                          sections={showInputSection ? ['output'] : undefined}
-                        />
-                      ) : null}
-                      <MessageButtons
-                        message={message}
-                        actions={actions}
-                        contentRef={contentRef}
-                      />
-                    </Step>
+                    <StepMessage
+                      step={message}
+                      elements={elements}
+                      actions={actions}
+                      indent={indent}
+                      isRunning={isRunning}
+                    />
                   ) : (
                     // Display an assistant message
                     <div className="flex flex-col items-start min-w-[150px] flex-grow gap-2">
                       <AssistantMessage
-                      // <MessageContent
-                        ref={contentRef}
+                        contentRef={contentRef}
                         elements={elements}
                         message={message}
                         allowHtml={allowHtml}

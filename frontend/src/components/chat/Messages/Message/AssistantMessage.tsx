@@ -38,7 +38,7 @@ const AssistantMessage = memo(function AssistantMessage({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(message.output || '');
 
-  const disabled = loading || !!askUser;
+  const disabled = loading;
 
   const handleSave = () => {
     if (!draft.trim()) return;
@@ -81,7 +81,6 @@ const AssistantMessage = memo(function AssistantMessage({
         />
 
 
-          {/* 只有 editable 才显示编辑按钮（与你的 UserMessage 一致） */}
           {editable && (
             <Button
               variant="ghost"

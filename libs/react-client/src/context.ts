@@ -5,7 +5,8 @@ import { ChainlitAPI } from './api';
 const defaultChainlitContext = undefined;
 
 const ChainlitContext = createContext<ChainlitAPI>(
-  new ChainlitAPI('http://localhost:8000', 'webapp')
+  // new ChainlitAPI('http://localhost:8000', 'webapp')
+  new ChainlitAPI("", "webapp")
 );
 
 export { ChainlitContext, defaultChainlitContext };

@@ -292,33 +292,157 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
         await context.emitter.task_end()
 
 
-@sio.on("edit_message")  # pyright: ignore [reportOptionalCall]
+async def fetch_steps(data_layer, thread_id: str):
+    from sqlalchemy import text
+    sql = text("""
+        SELECT
+            s."id"       AS step_id,
+            s."name"     AS step_name,
+            s."parentId" AS step_parentid,
+            s."input"    AS step_input,
+            s."output"   AS step_output
+        FROM steps s
+        WHERE s."threadId" = :thread_id
+        ORDER BY s."createdAt" ASC
+    """)
+
+    async with data_layer.async_session() as session:
+        result = await session.execute(sql, {"thread_id": thread_id})
+        rows = result.mappings().all()
+        return rows
+
+@sio.on("edit_message")  
 async def edit_message(sid, payload: MessagePayload):
-    """Handle a message sent by the User."""
-    session = WebsocketSession.require(sid)
-    context = init_ws_context(session)
+    from chainlit.step import Step
 
+    session = WebsocketSession.require(sid)  
+    context = init_ws_context(session)  
+  
     messages = chat_context.get()
-
-    orig_message = None
-
-    for message in messages:
-        if orig_message:
-            await message.remove()
-
-        if message.id == payload["message"]["id"]:
-            message.content = payload["message"]["output"]
-            await message.update()
+    if messages is None:
+        logger.error("No messages found in chat context.")
+        return
+    print("messages ids:", [m.id for m in messages if m])
+    steps_data = await fetch_steps(get_data_layer(), session.thread_id)
+    
+    # Message or Step id that has been edited
+    target_id = str(payload["message"]["id"])
+    # edited content
+    new_output = payload["message"].get("output")
+    
+    # try to locate the edited one by matching messages
+    orig_message = None  
+    original_content = "" 
+    
+    remove_messages = []
+    found = False 
+    for message in messages:  
+        if not message:  
+            continue
+        
+        if found:
+            remove_messages.append(message)
+            continue
+    
+        if str(message.id) == target_id:  
+            found = True
             orig_message = message
+            original_content = message.content or ""
+            
+            if new_output is None:
+                logger.error("No new output provided for edited message.")
+                return
+            message.content = new_output
+            
+            message.metadata = message.metadata or {}
+            message.metadata["edited"] = True
+            message.metadata["original_content"] = original_content
+            await message.update()
+            
+    for m in remove_messages:
+        # chat_context.remove(m)
+        await m.remove()
+    
+    print(payload["message"])
+    if not found:
+        new_input = payload["message"].get("input")
+        new_output = payload["message"].get("output")
+        
+        orig_step = None
+        step_original_content = ""
+        
+        remove_steps = []
+        found_step = False
+        
+        for s in steps_data:
+            step_id = str(s.get("step_id"))
+            step = Step(id=step_id, name=s.get("step_name"))
+            step.parent_id = str(s.get("step_parentid"))
+            
+            if found_step:
+                remove_steps.append(step)
+                continue
+            
+            if step_id == target_id:
+                logger.info(f"Found edited step: {step_id}")
+                found_step = True
+                orig_step = step
+                step_original_input = s.get("step_input")
+                step_original_output = s.get("step_output") 
+                
+                # judge whether input or output is edited
+                if new_input is not None and new_input != step_original_input:
+                    step_original_content = step_original_input or ""
+                    step.input = new_input
+                    step.output = None  # clear output if input is changed
+                elif new_output is not None and new_output != step_original_output:
+                    step_original_content = step_original_output or ""
+                    step.input = step_original_input
+                    step.output = new_output
+                else:
+                    logger.error("No changes detected in input or output.")
+                    break
+            
+                    
+                await step.update()
 
-    await context.emitter.task_start()
-
-    if config.code.on_message:
-        try:
-            await config.code.on_message(orig_message)
-        except asyncio.CancelledError:
-            pass
-        finally:
+        for s in remove_steps:
+            await s.remove()
+            
+        # if not original_content:
+        original_content = step_original_content
+        if not step_original_content:
+            logger.error("Original content not found in step.")
+            return
+            
+        # get one step
+        if orig_step is not None:
+            parent_id = str(orig_step.parent_id)
+            for m in messages:
+                if not m:
+                    continue
+                if str(m.id) == parent_id:
+                    orig_message = m
+                    orig_message.metadata = orig_message.metadata or {}
+                    orig_message.metadata["edited"] = True
+                    assert original_content != "", "original_content should not be empty"
+                    orig_message.metadata["original_content"] = original_content
+                    orig_message.metadata["edit_step"] = True
+                    orig_message.metadata["edited_step_id"] = str(orig_step.id)
+                    break
+    
+        if orig_message is None:
+            logger.error("Original message not found for editing.")
+            return
+            
+    await context.emitter.task_start()  
+  
+    if config.code.on_message:  
+        try:  
+            await config.code.on_message(orig_message)  
+        except asyncio.CancelledError:  
+            pass  
+        finally:  
             await context.emitter.task_end()
 
 
