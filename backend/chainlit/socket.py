@@ -329,6 +329,7 @@ async def edit_message(sid, payload: MessagePayload):
     target_id = str(payload["message"]["id"])
     # edited content
     new_output = payload["message"].get("output")
+    message_type = payload["message"].get("type")  
     
     # try to locate the edited one by matching messages
     orig_message = None  
@@ -401,6 +402,8 @@ async def edit_message(sid, payload: MessagePayload):
                     step.output = new_output
                 else:
                     logger.error("No changes detected in input or output.")
+                    logger.info(f"Original input: {step_original_input}, New input: {new_input}")
+                    logger.info(f"Original output: {step_original_output}, New output: {new_output}")
                     break
             
                     
@@ -414,26 +417,15 @@ async def edit_message(sid, payload: MessagePayload):
         if not step_original_content:
             logger.error("Original content not found in step.")
             return
-            
-        # get one step
-        if orig_step is not None:
-            parent_id = str(orig_step.parent_id)
-            for m in messages:
-                if not m:
-                    continue
-                if str(m.id) == parent_id:
-                    orig_message = m
-                    orig_message.metadata = orig_message.metadata or {}
-                    orig_message.metadata["edited"] = True
-                    assert original_content != "", "original_content should not be empty"
-                    orig_message.metadata["original_content"] = original_content
-                    orig_message.metadata["edit_step"] = True
-                    orig_message.metadata["edited_step_id"] = str(orig_step.id)
-                    break
-    
+        
         if orig_message is None:
-            logger.error("Original message not found for editing.")
-            return
+            orig_message = Message(content="")
+            orig_message.metadata = {}
+            orig_message.metadata["edited"] = True
+            orig_message.metadata["original_content"] = original_content
+            orig_message.metadata["edit_step"] = True
+            orig_message.metadata["edited_step_id"] = str(orig_step.id)
+            orig_message.metadata["type"] = message_type
             
     await context.emitter.task_start()  
   
