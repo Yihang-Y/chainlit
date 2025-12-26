@@ -582,3 +582,108 @@ async def change_settings(sid, settings: Dict[str, Any]):
 
     if config.code.on_settings_update:
         await config.code.on_settings_update(settings)
+
+
+async def get_openai_history(thread_id: str, compressed: bool = False, cot_settings: Optional[str] = None):
+    from typing import Any, Mapping, Optional, Dict, List
+
+    data_layer = get_data_layer()
+    thread = await data_layer.get_thread(thread_id)
+
+    # 1) 全量 flatten（先不排序）
+    flat: List[Dict[str, Any]] = []
+
+    def collect_steps(steps: List[Dict[str, Any]]):
+        for s in steps or []:
+            # 跳过 wrapper steps，但继续收集其 children
+            if s.get("name") in ["on_chat_start", "on_message", "on_audio_end"]:
+                collect_steps(s.get("steps") or [])
+                continue
+
+            flat.append(s)
+            collect_steps(s.get("steps") or [])
+
+    collect_steps(thread.get("steps", []))
+
+    # 2) 全局按 createdAt 排序（保证跨层顺序稳定）
+    flat_sorted = sorted(
+        [s for s in flat if s.get("createdAt")],
+        key=lambda x: x["createdAt"]
+    )
+
+    # 3) 找到“最后一个 cot step”
+    last_cot = None
+    for s in flat_sorted:
+        if s.get("type") == "cot":
+            last_cot = s
+
+    messages: List[Dict[str, str]] = []
+
+    for s in flat_sorted:
+        stype = s.get("type") or ""
+
+        if stype in ["system_message", "user_message", "assistant_message"]:
+            content = (s.get("output") or "")
+            if stype == "assistant_message" and "**Selected:**" in content:
+                continue
+            messages.append({"role": stype.replace("_message", ""), "content": content})
+
+        elif stype == "tool":
+            if compressed:
+                continue
+            input_content = (s.get("input") or "")
+            output_content = (s.get("output") or "")
+            # 简单回放（如果你们没有 tool_call_id）
+            messages.append({"role": "assistant", "content": input_content})
+            messages.append({"role": "tool", "content": output_content})
+
+        elif stype == "cot":
+            if not compressed or s is last_cot:
+                output_content = str(s.get("output") or "").strip()
+                messages.append({"role": "assistant", "content": f"<think>{output_content}</think>"})
+            else:
+                plan = str(s.get("input") or "").strip()
+                messages.append({"role": "assistant", "content": f"<think>{plan}</think>"})
+
+    return messages
+
+@sio.on("export_chat")
+async def export_chat(sid, payload):
+    from datetime import datetime
+
+    thread_id = (payload or {}).get("threadId")
+    if not thread_id:
+        return {"success": False, "error": "Missing threadId"}
+
+    # 可选参数：是否压缩、cot 设置
+    compressed = bool((payload or {}).get("compressed", False))
+    cot_settings = (payload or {}).get("cot_settings")  # Optional[str]
+
+    try:
+        # 直接用你的统一回放函数生成 OpenAI messages
+        messages = await get_openai_history(
+            thread_id=thread_id,
+            compressed=compressed,
+            cot_settings=cot_settings
+        )
+
+        export_obj = {
+            "thread_id": thread_id,
+            "exported_at": datetime.now().isoformat(),
+            "compressed": compressed,
+            "cot_settings": cot_settings,
+            "messages": messages
+        }
+
+        import json
+        json_content = json.dumps(export_obj, indent=2, ensure_ascii=False)
+
+        suffix = "compressed" if compressed else "full"
+        return {
+            "success": True,
+            "filename": f"chat_export_{thread_id[:8]}_{suffix}.json",
+            "content": json_content
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}

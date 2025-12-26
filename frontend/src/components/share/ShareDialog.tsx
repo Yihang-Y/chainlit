@@ -5,7 +5,8 @@ import { toast } from 'sonner';
 import {
   ChainlitContext,
   ClientError,
-  threadHistoryState
+  threadHistoryState,
+  useChatSession
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
@@ -24,16 +25,20 @@ type ShareDialogProps = {
   threadId?: string | null;
 };
 
-export function ShareDialog({
-  open,
-  onOpenChange,
-  threadId
-}: ShareDialogProps) {
+export function ShareDialog({ open, onOpenChange, threadId }: ShareDialogProps) {
   const apiClient = useContext(ChainlitContext);
+
+  // ✅ Hook 必须在组件内部
+  const { session } = useChatSession();
+
   const [isCopying, setIsCopying] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [hasBeenCopied, setHasBeenCopied] = useState(false);
   const [sharedThreadId, setSharedThreadId] = useState<string | null>(null);
+
+  // ✅ 导出独立 loading
+  const [isExporting, setIsExporting] = useState(false);
+
   const threadHistory = useRecoilValue(threadHistoryState);
   const setThreadHistory = useSetRecoilState(threadHistoryState);
 
@@ -49,6 +54,37 @@ export function ShareDialog({
     const id = sharedThreadId || threadId || '';
     return `${window.location.origin}/share/${id}`;
   }, [sharedThreadId, threadId]);
+
+  const handleExport = async () => {
+    if (!threadId) return;
+  
+    try {
+      const response: any = await session?.socket.emitWithAck('export_chat', {
+        threadId,
+        compressed: false
+      });
+  
+      if (!response?.success) {
+        toast.error(response?.error || 'Export failed');
+        return;
+      }
+  
+      const blob = new Blob([response.content], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = response.filename || `chat_export_${threadId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+  
+      toast.success('Exported');
+    } catch (e: any) {
+      toast.error(e?.message || 'Export failed');
+    }
+  };
+  
 
   const handleCopy = async () => {
     if (!threadId) return;
@@ -69,13 +105,10 @@ export function ShareDialog({
         if (typeof (apiClient as any)?.shareThread === 'function') {
           await (apiClient as any).shareThread(threadId, true);
         } else {
-          const putRes = await (apiClient as any).put?.(
-            `/project/thread/share`,
-            {
-              threadId,
-              isShared: true
-            }
-          );
+          const putRes = await (apiClient as any).put?.(`/project/thread/share`, {
+            threadId,
+            isShared: true
+          });
           await putRes?.json?.();
         }
         setSharedThreadId(threadId);
@@ -105,7 +138,6 @@ export function ShareDialog({
     } catch (err: any) {
       setIsCopying(false);
       if (err instanceof ClientError) {
-        // Show server-provided detail when available
         toast.error(err.toString());
       } else {
         toast.error(
@@ -176,6 +208,7 @@ export function ShareDialog({
             <Translator path="threadHistory.thread.actions.share.title" />
           </DialogTitle>
         </DialogHeader>
+
         <div className="flex flex-col gap-3 w-full">
           <div className="rounded-md border px-3 py-2 w-full">
             <span
@@ -185,17 +218,27 @@ export function ShareDialog({
               {shareLink}
             </span>
           </div>
-          <div className="flex gap-2 justify-center">
+
+          <div className="flex gap-2 justify-center flex-wrap">
             <Button
               onClick={handleCopy}
-              disabled={!threadId || isCopying || isCopied}
+              disabled={!threadId || isCopying || isCopied || isExporting}
             >
               <Translator path="threadHistory.thread.actions.share.button" />
             </Button>
+
+            <Button
+              onClick={handleExport}
+              disabled={!threadId || isCopying || isExporting}
+              variant="outline"
+            >
+              Export
+            </Button>
+
             {isAlreadyShared ? (
               <Button
                 onClick={handleUnshare}
-                disabled={!threadId || isCopying}
+                disabled={!threadId || isCopying || isExporting}
                 variant="outline"
               >
                 Unshare

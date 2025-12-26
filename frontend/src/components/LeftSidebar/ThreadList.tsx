@@ -100,6 +100,47 @@ export function ThreadList({
     // ShareDialog handles its own internal state; we just open it
   };
 
+  const handleExportThread = async (threadId: string) => {
+    if (!dataPersistence) {
+      toast.error('Data persistence is disabled');
+      return;
+    }
+    if (!session?.socket) {
+      toast.error('Socket not ready');
+      return;
+    }
+  
+    try {
+      const res: any = await session.socket.emitWithAck('export_chat', {
+        threadId,
+        compressed: false
+      });
+  
+      if (!res?.success) {
+        toast.error(res?.error || 'Export failed');
+        return;
+      }
+  
+      const blob = new Blob([res.content], {
+        type: 'application/json;charset=utf-8'
+      });
+      const url = URL.createObjectURL(blob);
+  
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.filename || `chat_export_${threadId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+  
+      URL.revokeObjectURL(url);
+      toast.success('Exported');
+    } catch (e: any) {
+      toast.error(e?.message || 'Export failed');
+    }
+  };
+  
+
   const sortedTimeGroupKeys = useMemo(() => {
     if (!threadHistory?.timeGroupedThreads) return [];
     const fixedOrder = [
@@ -368,6 +409,11 @@ export function ThreadList({
                                       ? () => handleShareThread(thread.id)
                                       : undefined
                                   }
+                                  onExport={  
+                                    dataPersistence  
+                                      ? () => handleExportThread(thread.id)  
+                                      : undefined  
+                                  }  
                                   className={cn(
                                     'absolute z-20 bottom-0 top-0 right-0 bg-sidebar-accent hover:bg-sidebar-accent hover:text-primary flex opacity-0 group-hover/thread:opacity-100',
                                     isSelected &&

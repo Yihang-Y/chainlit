@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import { Ellipsis, Share2, Trash2 } from 'lucide-react';
+import { Download } from 'lucide-react';  
 
 import { Pencil } from '@/components/icons/Pencil';
 import { buttonVariants } from '@/components/ui/button';
@@ -10,12 +11,14 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 
+
 import { Translator } from '../i18n';
 
 interface Props {
   onDelete: () => void;
   onRename: () => void;
   onShare?: () => void;
+  onExport?: () => void;
   className?: string;
 }
 
@@ -23,6 +26,7 @@ export default function ThreadOptions({
   onDelete,
   onRename,
   onShare,
+  onExport,
   className
 }: Props) {
   return (
@@ -64,6 +68,18 @@ export default function ThreadOptions({
           >
             <Translator path="threadHistory.thread.menu.share" />
             <Share2 className="ml-auto" />
+          </DropdownMenuItem>
+        )}
+        {onExport && (
+          <DropdownMenuItem
+            id="export-thread"
+            onClick={(e) => {
+              e.stopPropagation();
+              onExport();
+            }}
+          >
+            Export
+            <Download className="ml-auto" />
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
