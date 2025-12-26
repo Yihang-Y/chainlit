@@ -122,6 +122,20 @@ class FileSpec(DataClassJsonMixin):
     max_files: int
     max_size_mb: int
 
+@dataclass
+class ToolItem(DataClassJsonMixin):
+    id: str
+    name: str
+    description: Optional[str] = None
+    mcp: Optional[str] = None
+    mcp_url: Optional[str] = None
+
+@dataclass
+class ToolPickerSpecMixin(DataClassJsonMixin):
+    tools: list[ToolItem] | None = None
+    title: str | None = None
+    prompt: str | None = None
+    keys: list[str] | None = None
 
 @dataclass
 class ActionSpec(DataClassJsonMixin):
@@ -133,7 +147,7 @@ class AskSpec(DataClassJsonMixin):
     """Specification for asking the user."""
 
     timeout: int
-    type: Literal["text", "file", "action", "element"]
+    type: Literal["text", "file", "action", "element", "tool_picker"]
     step_id: str
 
 
@@ -153,6 +167,11 @@ class AskElementSpec(AskSpec, DataClassJsonMixin):
 
     element_id: str
 
+
+@dataclass
+class AskToolPickerSpec(ToolPickerSpecMixin, AskSpec, DataClassJsonMixin):
+    """Specification for asking the user to pick a tool"""
+    pass
 
 class FileReference(TypedDict):
     id: str

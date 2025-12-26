@@ -12,6 +12,7 @@ import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 
 import { Messages } from '..';
 import { AskActionButtons } from './AskActionButtons';
+import { AskToolPickerModal } from './AskToolPickerModal';
 import { AskFileButton } from './AskFileButton';
 import { MessageAvatar } from './Avatar';
 import { MessageButtons } from './Buttons';
@@ -140,6 +141,8 @@ const Message = memo(
                         actions={actions}
                         messageId={message.id}
                       />
+
+                      <AskToolPickerModal messageId={message.id} />
 
                       <MessageButtons
                         message={message}

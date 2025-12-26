@@ -1,4 +1,4 @@
-import { memo, useContext, useState } from 'react';
+import { memo, useContext, useState, useMemo } from 'react';
 import { useSetRecoilState } from 'recoil';
 
 import {
@@ -16,13 +16,12 @@ import { Button } from '@/components/ui/button';
 import { MessageContent } from './Content';
 
 interface Props {
-    message: IStep;
-    elements: IMessageElement[];
-    contentRef?: React.RefObject<HTMLDivElement>;
-    allowHtml?: boolean;
-    latex?: boolean;
+  message: IStep;
+  elements: IMessageElement[];
+  contentRef?: React.RefObject<HTMLDivElement>;
+  allowHtml?: boolean;
+  latex?: boolean;
 }
-  
 
 const AssistantMessage = memo(function AssistantMessage({
   message,
@@ -31,7 +30,7 @@ const AssistantMessage = memo(function AssistantMessage({
   allowHtml,
   latex
 }: Props) {
-  const { loading, askUser, editable } = useContext(MessageContext);
+  const { loading, editable } = useContext(MessageContext);
   const { editMessage } = useChatInteract();
   const setMessages = useSetRecoilState(messagesState);
 
@@ -40,20 +39,38 @@ const AssistantMessage = memo(function AssistantMessage({
 
   const disabled = loading;
 
+  // 兼容 parentId 字段命名差异
+  const parentId = (message as any).parentId ?? (message as any).parent_id ?? (message as any).parentId;
+
   const handleSave = () => {
     if (!draft.trim()) return;
 
-    // 1) 立即更新 UI（overwrite：截断后续）
+    // 1) 立即更新 UI + 清理下游
     setMessages((prev) => {
       const index = prev.findIndex((m) => m.id === message.id);
       if (index === -1) return prev;
 
-      const slice = prev.slice(0, index + 1);
+      // 默认：截断到当前 message
+      let cutIndex = index;
 
+      // 新策略：截断到 parent 的“后一个”
+      if (parentId) {
+        const parentIndex = prev.findIndex((m) => m.id === parentId);
+        if (parentIndex !== -1) {
+          cutIndex = Math.min(parentIndex + 1, prev.length - 1);
+        }
+      }
+
+      // ⚠️ 关键：不能把自己截断掉，否则 patch 看不到
+      cutIndex = Math.max(cutIndex, index);
+
+      const slice = prev.slice(0, cutIndex + 1);
+
+      // 更新当前 message（在 slice 里一定存在，因为上面保证了 cutIndex >= index）
       slice[index] = {
         ...slice[index],
         output: draft,
-        steps: [] // 可选但建议：清掉可能挂载的 steps，和 UserMessage 思路一致
+        steps: [] // 建议清掉 children，避免父输出变了 children 仍旧
       };
 
       return slice;
@@ -72,14 +89,13 @@ const AssistantMessage = memo(function AssistantMessage({
     <div className="flex flex-col items-start gap-2 w-full">
       {!isEditing && (
         <div className="relative group w-full">
-        <MessageContent
-        ref={contentRef}
-        elements={elements}
-        message={message}
-        allowHtml={allowHtml}
-        latex={latex}
-        />
-
+          <MessageContent
+            ref={contentRef}
+            elements={elements}
+            message={message}
+            allowHtml={allowHtml}
+            latex={latex}
+          />
 
           {editable && (
             <Button

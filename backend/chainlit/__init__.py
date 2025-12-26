@@ -46,6 +46,7 @@ from chainlit.message import (
     AskUserMessage,
     ErrorMessage,
     Message,
+    AskToolPickerMessage,
 )
 from chainlit.sidebar import ElementSidebar
 from chainlit.step import Step, step

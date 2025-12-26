@@ -311,6 +311,46 @@ async def fetch_steps(data_layer, thread_id: str):
         rows = result.mappings().all()
         return rows
 
+def _build_parent_map(steps_data):
+    parent_map = {}
+    for s in steps_data:
+        sid = str(s.get("step_id"))
+        pid = s.get("step_parentid")
+        parent_map[sid] = str(pid) if pid is not None else None
+    return parent_map
+
+def _is_descendant(node_id: str, ancestor_id: str, parent_map: dict) -> bool:
+    cur = node_id
+    # 向上爬 parent 链
+    while cur is not None:
+        p = parent_map.get(cur)
+        if p is None:
+            return False
+        if p == ancestor_id:
+            return True
+        cur = p
+    return False
+
+def find_subtree_end_index(steps_data, parent_id: str) -> int:
+    parent_id = str(parent_id)
+    parent_map = _build_parent_map(steps_data)
+
+    parent_index = -1
+    for i, s in enumerate(steps_data):
+        if str(s.get("step_id")) == parent_id:
+            parent_index = i
+            break
+    if parent_index == -1:
+        return -1
+
+    end = parent_index
+    for i in range(parent_index + 1, len(steps_data)):
+        sid = str(steps_data[i].get("step_id"))
+        if _is_descendant(sid, parent_id, parent_map):
+            end = i
+    return end
+
+
 @sio.on("edit_message")  
 async def edit_message(sid, payload: MessagePayload):
     from chainlit.step import Step
@@ -324,7 +364,11 @@ async def edit_message(sid, payload: MessagePayload):
         return
     print("messages ids:", [m.id for m in messages if m])
     steps_data = await fetch_steps(get_data_layer(), session.thread_id)
-    
+    steps_data = sorted(
+        steps_data,
+        key=lambda s: s.get("createdAt") or s.get("created_at") or 0
+    )
+
     # Message or Step id that has been edited
     target_id = str(payload["message"]["id"])
     # edited content
@@ -368,56 +412,64 @@ async def edit_message(sid, payload: MessagePayload):
     if not found:
         new_input = payload["message"].get("input")
         new_output = payload["message"].get("output")
-        
-        orig_step = None
-        step_original_content = ""
-        
-        remove_steps = []
-        found_step = False
-        
-        for s in steps_data:
-            step_id = str(s.get("step_id"))
-            step = Step(id=step_id, name=s.get("step_name"))
-            step.parent_id = str(s.get("step_parentid"))
-            
-            if found_step:
-                remove_steps.append(step)
-                continue
-            
-            if step_id == target_id:
-                logger.info(f"Found edited step: {step_id}")
-                found_step = True
-                orig_step = step
-                step_original_input = s.get("step_input")
-                step_original_output = s.get("step_output") 
-                
-                # judge whether input or output is edited
-                if new_input is not None and new_input != step_original_input:
-                    step_original_content = step_original_input or ""
-                    step.input = new_input
-                    step.output = None  # clear output if input is changed
-                elif new_output is not None and new_output != step_original_output:
-                    step_original_content = step_original_output or ""
-                    step.input = step_original_input
-                    step.output = new_output
-                else:
-                    logger.error("No changes detected in input or output.")
-                    logger.info(f"Original input: {step_original_input}, New input: {new_input}")
-                    logger.info(f"Original output: {step_original_output}, New output: {new_output}")
-                    break
-            
-                    
-                await step.update()
 
-        for s in remove_steps:
-            await s.remove()
-            
-        # if not original_content:
+        # 1) locate target step row
+        target_row = None
+        for s in steps_data:
+            if str(s.get("step_id")) == target_id:
+                target_row = s
+                break
+
+        if not target_row:
+            logger.error(f"Edited target id {target_id} not found in steps_data.")
+            return
+
+        step_id = str(target_row.get("step_id"))
+        step_name = target_row.get("step_name") or "step"
+        step_parentid = target_row.get("step_parentid")
+        step_parentid_str = str(step_parentid) if step_parentid is not None else None
+
+        # 2) prepare Step object (the one being edited)
+        orig_step = Step(id=step_id, name=step_name)
+        orig_step.parent_id = step_parentid_str
+
+        step_original_input = target_row.get("step_input")
+        step_original_output = target_row.get("step_output")
+
+        # 3) apply patch + capture original_content
+        step_original_content = ""
+        if new_input is not None and new_input != step_original_input:
+            step_original_content = step_original_input or ""
+            orig_step.input = new_input
+            orig_step.output = None  # input changed => clear output
+        elif new_output is not None and new_output != step_original_output:
+            step_original_content = step_original_output or ""
+            orig_step.input = step_original_input
+            orig_step.output = new_output
+        else:
+            logger.error("No changes detected in input or output.")
+            logger.info(f"Original input: {step_original_input}, New input: {new_input}")
+            logger.info(f"Original output: {step_original_output}, New output: {new_output}")
+            return
+
+        await orig_step.update()
+
+        # 4) delete steps after parent subtree end
+        if step_parentid_str:
+            subtree_end = find_subtree_end_index(steps_data, step_parentid_str)
+            if subtree_end != -1:
+                for s2 in steps_data[subtree_end + 1 :]:
+                    sid2 = str(s2.get("step_id"))
+                    st = Step(id=sid2, name=s2.get("step_name"))
+                    st.parent_id = str(s2.get("step_parentid")) if s2.get("step_parentid") is not None else None
+                    await st.remove()
+
+        # 5) fabricate an orig_message to trigger on_message downstream logic
         original_content = step_original_content
-        if not step_original_content:
+        if not original_content:
             logger.error("Original content not found in step.")
             return
-        
+
         if orig_message is None:
             orig_message = Message(content="")
             orig_message.metadata = {}
@@ -426,7 +478,7 @@ async def edit_message(sid, payload: MessagePayload):
             orig_message.metadata["edit_step"] = True
             orig_message.metadata["edited_step_id"] = str(orig_step.id)
             orig_message.metadata["type"] = message_type
-            
+
     await context.emitter.task_start()  
   
     if config.code.on_message:  

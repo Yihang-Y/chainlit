@@ -70,24 +70,42 @@ const StepMessage = memo(function StepMessage({
     setMessages((prev) => {
       const index = prev.findIndex((m) => m.id === step.id);
       if (index === -1) return prev;
-
-      const slice = prev.slice(0, index + 1);
-
-      slice[index] = {
-        ...slice[index],
-        ...patch,
-        // 和你原逻辑一致：编辑后清掉子树，避免旧 steps 残留
-        steps: []
-      };
-
+  
+      const parentId = (step as any).parentId ?? (step as any).parent_id ?? step.parentId;
+  
+      // 默认还是截断到当前 step
+      let cutIndex = index;
+  
+      // 如果能找到 parent，则改为截断到 parent 的“后一个”
+      if (parentId) {
+        const parentIndex = prev.findIndex((m) => m.id === parentId);
+        if (parentIndex !== -1) {
+          cutIndex = Math.min(parentIndex + 1, prev.length - 1);
+        }
+      }
+  
+      const slice = prev.slice(0, cutIndex + 1);
+  
+      // 更新当前 step 本身（如果当前 step 已经被截断掉了，就不会更新到 UI 里）
+      // 所以这里通常还要：保证 cutIndex >= index，或者单独 patch parent
+      const idxInSlice = slice.findIndex((m) => m.id === step.id);
+      if (idxInSlice !== -1) {
+        slice[idxInSlice] = {
+          ...slice[idxInSlice],
+          ...patch,
+          steps: []
+        };
+      }
+  
       return slice;
     });
-
+  
     editMessage({
       ...step,
       ...patch
     });
   };
+  
 
   const handleSaveOutput = () => {
     if (!draftOutput.trim()) return;

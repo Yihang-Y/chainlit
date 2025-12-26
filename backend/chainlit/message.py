@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 from abc import ABC
-from typing import Dict, List, Optional, Union, cast
+from typing import Dict, List, Optional, Union, cast, Any
 
 from literalai.observability.step import MessageStepType
 
@@ -24,6 +24,8 @@ from chainlit.types import (
     AskFileSpec,
     AskSpec,
     FileDict,
+    ToolItem,
+    AskToolPickerSpec
 )
 from chainlit.utils import utc_now
 
@@ -554,6 +556,65 @@ class AskActionMessage(AskMessageBase):
 
         return res
 
+class AskToolPickerMessage(AskMessageBase):
+    def __init__(
+        self,
+        content: str,
+        tools: List[ToolItem],
+        title: str = "Choose a tool",
+        author=config.ui.name,
+        timeout: int = 90,
+        raise_on_timeout: bool = False,
+        keys: Optional[List[str]] = None,
+    ):
+        self.content = content
+        self.tools = tools
+        self.title = title
+        self.author = author
+        self.timeout = timeout
+        self.raise_on_timeout = raise_on_timeout
+        self.keys = keys
+        super().__post_init__()
+
+    async def send(self) -> Optional[Dict[str, Any]]:
+        if not self.created_at:
+            self.created_at = utc_now()
+
+        if self.streaming:
+            self.streaming = False
+
+        if config.code.author_rename:
+            self.author = await config.code.author_rename(self.author)
+
+        self.wait_for_answer = True
+
+        step_dict = await self._create()
+
+        spec = AskToolPickerSpec(
+            type="tool_picker",
+            step_id=step_dict["id"],
+            timeout=self.timeout,
+            title=self.title,
+            prompt=self.content,
+            tools=self.tools,
+            keys=self.keys,
+        )
+
+        res = cast(
+            Optional[Dict[str, Any]],
+            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
+        )
+
+        if not res:
+            self.content = "Timed out: no tool was selected"
+        else:
+            tool_id = res.get("tool_id") or res.get("id") or "unknown"
+            self.content = f"**Selected Tool:** {tool_id}"
+
+        self.wait_for_answer = False
+        await self.update()
+
+        return res
 
 class AskElementMessage(AskMessageBase):
     """Ask the user to submit a custom element."""
