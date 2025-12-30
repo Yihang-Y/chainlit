@@ -300,7 +300,8 @@ async def fetch_steps(data_layer, thread_id: str):
             s."name"     AS step_name,
             s."parentId" AS step_parentid,
             s."input"    AS step_input,
-            s."output"   AS step_output
+            s."output"   AS step_output,
+            s."type"     AS type
         FROM steps s
         WHERE s."threadId" = :thread_id
         ORDER BY s."createdAt" ASC
@@ -364,6 +365,7 @@ async def edit_message(sid, payload: MessagePayload):
         return
     print("messages ids:", [m.id for m in messages if m])
     steps_data = await fetch_steps(get_data_layer(), session.thread_id)
+    print("steps_data:", steps_data)
     steps_data = sorted(
         steps_data,
         key=lambda s: s.get("createdAt") or s.get("created_at") or 0
@@ -418,9 +420,11 @@ async def edit_message(sid, payload: MessagePayload):
         for s in steps_data:
             if str(s.get("step_id")) == target_id:
                 target_row = s
+                print("found target step:", s)
                 break
 
         if not target_row:
+            print("Not found target step id in steps_data:", target_id)
             logger.error(f"Edited target id {target_id} not found in steps_data.")
             return
 
@@ -455,14 +459,44 @@ async def edit_message(sid, payload: MessagePayload):
         await orig_step.update()
 
         # 4) delete steps after parent subtree end
+        # if step_parentid_str:
+        #     subtree_end = find_subtree_end_index(steps_data, step_parentid_str)
+        #     if subtree_end != -1:
+        #         for s2 in steps_data[subtree_end + 1 :]:
+        #             sid2 = str(s2.get("step_id"))
+        #             st = Step(id=sid2, name=s2.get("step_name"))
+        #             st.parent_id = str(s2.get("step_parentid")) if s2.get("step_parentid") is not None else None
+        #             await st.remove()
         if step_parentid_str:
-            subtree_end = find_subtree_end_index(steps_data, step_parentid_str)
-            if subtree_end != -1:
-                for s2 in steps_data[subtree_end + 1 :]:
-                    sid2 = str(s2.get("step_id"))
-                    st = Step(id=sid2, name=s2.get("step_name"))
-                    st.parent_id = str(s2.get("step_parentid")) if s2.get("step_parentid") is not None else None
-                    await st.remove()
+            parent_id = step_parentid_str
+        else:
+            # 如果你的语义是“保留 edited step 的子树”，就用 step_id
+            parent_id = step_id  # 看你实际想保留谁的子树
+
+        parent_map = _build_parent_map(steps_data)
+
+        # 找 parent 在时间线的位置
+        parent_index = -1
+        for i, s in enumerate(steps_data):
+            if str(s.get("step_id")) == str(parent_id):
+                parent_index = i
+                break
+        if parent_index == -1:
+            print("parent not found, skip cleanup")
+            return
+        if parent_index + 1 >= len(steps_data):
+            print("no steps after parent, skip cleanup")
+            return
+        # 从 parent 之后开始删：凡是不在 parent 
+        for s2 in steps_data[parent_index + 1:]:
+            # print(s2)
+            sid2 = str(s2.get("step_id"))
+            in_subtree = (sid2 == str(parent_id)) or _is_descendant(sid2, str(parent_id), parent_map)
+            if not in_subtree:
+                print("removing step:", s2)
+                st = Step(id=sid2, name=s2.get("step_name") or "step")
+                st.parent_id = str(s2.get("step_parentid")) if s2.get("step_parentid") is not None else None
+                await st.remove()
 
         # 5) fabricate an orig_message to trigger on_message downstream logic
         original_content = step_original_content
@@ -489,6 +523,183 @@ async def edit_message(sid, payload: MessagePayload):
         finally:  
             await context.emitter.task_end()
 
+@sio.on("regenerate_message")  # pyright: ignore [reportOptionalCall]
+async def regenerate_message(sid, payload: MessagePayload):
+    """
+    Handle a regenerate message request.
+    
+    Logic:
+    1. Find the target message/step to regenerate
+    2. Find the original user message that triggered it (by tracing parent chain)
+    3. Delete the target and all subsequent messages/steps
+    4. Re-send the original user message to trigger regeneration
+    """
+    from chainlit.step import Step
+    from chainlit.message import Message
+    
+    session = WebsocketSession.require(sid)
+    context = init_ws_context(session)
+    
+    messages = chat_context.get()
+    if messages is None:
+        logger.error("No messages found in chat context.")
+        return
+    
+    # Get target message/step id to regenerate
+    target_id = str(payload["message"]["id"])
+    
+    # Get all steps data
+    steps_data = await fetch_steps(get_data_layer(), session.thread_id)
+    steps_data = sorted(
+        steps_data,
+        key=lambda s: s.get("createdAt") or s.get("created_at") or 0
+    )
+    
+    # Build parent map for tracing
+    parent_map = _build_parent_map(steps_data)
+    
+    # Step 1: Find the target step in steps_data
+    target_step_row = None
+    for s in steps_data:
+        if str(s.get("step_id")) == target_id:
+            target_step_row = s
+            break
+    
+    if not target_step_row:
+        logger.error(f"Target step {target_id} not found in steps_data.")
+        return
+    
+    # Step 2: Trace back to find the original user message
+    # Strategy: Go up the parent chain until we find a user_message
+    current_id = target_id
+    user_message_id = None
+    user_message_content = None
+    
+    # First, try to find in messages list
+    for msg in messages:
+        if str(msg.id) == target_id:
+            # Found in messages, trace back through parent_id
+            current_msg = msg
+            visited = set()  # Prevent infinite loops
+            
+            while current_msg and str(current_msg.id) not in visited:
+                visited.add(str(current_msg.id))
+                
+                # Check if this is a user message
+                if hasattr(current_msg, 'type') and current_msg.type == 'user_message':
+                    user_message_id = str(current_msg.id)
+                    user_message_content = current_msg.content
+                    break
+                
+                # Get parent_id
+                parent_id = getattr(current_msg, 'parentId', None) or getattr(current_msg, 'parent_id', None)
+                if not parent_id:
+                    break
+                
+                # Find parent message
+                current_msg = None
+                for m in messages:
+                    if str(m.id) == str(parent_id):
+                        current_msg = m
+                        break
+                if not current_msg:
+                    break
+    
+    # If not found in messages, trace through steps_data parent chain
+    if not user_message_id:
+        current_step_id = target_id
+        visited = set()
+        
+        while current_step_id and current_step_id not in visited:
+            visited.add(current_step_id)
+            
+            # Find step in steps_data
+            current_step = None
+            for s in steps_data:
+                if str(s.get("step_id")) == current_step_id:
+                    current_step = s
+                    break
+            
+            if not current_step:
+                break
+            
+            # Check if this step corresponds to a user message
+            step_type = current_step.get("step_type") or ""
+            if "user_message" in step_type.lower():
+                # Try to find the actual user message
+                for msg in messages:
+                    if str(msg.id) == current_step_id:
+                        user_message_id = str(msg.id)
+                        user_message_content = msg.content
+                        break
+                if user_message_id:
+                    break
+            
+            # Move to parent
+            parent_id = current_step.get("step_parentid")
+            if not parent_id:
+                break
+            current_step_id = str(parent_id)
+    
+    if not user_message_id or not user_message_content:
+        logger.error(f"Could not find original user message for target {target_id}.")
+        return
+    
+    # Step 3: Delete target and all subsequent messages/steps
+    # Find target's position in steps_data
+    target_index = -1
+    for i, s in enumerate(steps_data):
+        if str(s.get("step_id")) == target_id:
+            target_index = i
+            break
+    
+    if target_index == -1:
+        logger.error(f"Target step {target_id} not found in sorted steps_data.")
+        return
+    
+    # Delete all steps from target onwards (including target itself)
+    steps_to_delete = steps_data[target_index:]
+    for s in steps_to_delete:
+        step_id = str(s.get("step_id"))
+        try:
+            step = Step(id=step_id, name=s.get("step_name") or "step")
+            step.parent_id = str(s.get("step_parentid")) if s.get("step_parentid") is not None else None
+            await step.remove()
+            logger.info(f"Deleted step {step_id} during regenerate")
+        except Exception as e:
+            logger.warning(f"Failed to delete step {step_id}: {e}")
+    
+    # Also remove from messages list (for UI consistency)
+    messages_to_remove = []
+    found_target = False
+    for msg in messages:
+        if str(msg.id) == target_id:
+            found_target = True
+        if found_target:
+            messages_to_remove.append(msg)
+    
+    for msg in messages_to_remove:
+        try:
+            await msg.remove()
+        except Exception as e:
+            logger.warning(f"Failed to remove message {msg.id}: {e}")
+    
+    # Step 4: Re-send the original user message to trigger regeneration
+    orig_message = Message(content=user_message_content)
+    orig_message.id = user_message_id
+    orig_message.metadata = {}
+    orig_message.metadata["regenerated"] = True
+    orig_message.metadata["regenerated_from"] = target_id
+    
+    await context.emitter.task_start()
+    
+    if config.code.on_message:
+        try:
+            await config.code.on_message(orig_message)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await context.emitter.task_end()
 
 @sio.on("client_message")  # pyright: ignore [reportOptionalCall]
 async def message(sid, payload: MessagePayload):

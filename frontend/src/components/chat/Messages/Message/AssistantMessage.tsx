@@ -89,19 +89,21 @@ const AssistantMessage = memo(function AssistantMessage({
     <div className="flex flex-col items-start gap-2 w-full">
       {!isEditing && (
         <div className="relative group w-full">
-          <MessageContent
-            ref={contentRef}
-            elements={elements}
-            message={message}
-            allowHtml={allowHtml}
-            latex={latex}
-          />
+          <div className="pr-8">
+            <MessageContent
+              ref={contentRef}
+              elements={elements}
+              message={message}
+              allowHtml={allowHtml}
+              latex={latex}
+            />
+          </div>
 
           {editable && (
             <Button
               variant="ghost"
               size="icon"
-              className="absolute top-1 right-1 invisible group-hover:visible"
+              className="absolute top-1 right-1 invisible group-hover:visible z-10"
               onClick={() => {
                 setDraft(message.output || '');
                 setIsEditing(true);

@@ -88,6 +88,13 @@ const useChatInteract = () => {
     [session?.socket]
   );
 
+  const regenerateMessage = useCallback(
+    (message: IStep) => {
+      session?.socket.emit('regenerate_message', { message });
+    },
+    [session?.socket]
+  );
+
   const windowMessage = useCallback(
     (data: any) => {
       session?.socket.emit('window_message', data);
@@ -164,6 +171,7 @@ const useChatInteract = () => {
     replyMessage,
     sendMessage,
     editMessage,
+    regenerateMessage,
     windowMessage,
     startAudioStream,
     sendAudioChunk,

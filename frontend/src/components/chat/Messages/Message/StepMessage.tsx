@@ -142,19 +142,21 @@ const StepMessage = memo(function StepMessage({
           <div className="relative group w-full">
             {!isEditingInput ? (
               <>
-                <MessageContent
-                  elements={elements}
-                  message={step}
-                  allowHtml={allowHtml}
-                  latex={latex}
-                  sections={['input']}
-                />
+                <div className="pr-8">
+                  <MessageContent
+                    elements={elements}
+                    message={step}
+                    allowHtml={allowHtml}
+                    latex={latex}
+                    sections={['input']}
+                  />
+                </div>
 
                 {editable ? (
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="absolute top-1 right-1 invisible group-hover:visible"
+                    className="absolute top-1 right-1 invisible group-hover:visible z-10"
                     onClick={() => {
                       // 每次点编辑时从当前 step.input 重新生成草稿，避免 stale
                       const v =
@@ -225,20 +227,22 @@ const StepMessage = memo(function StepMessage({
           <div className="relative group w-full">
             {!isEditingOutput ? (
               <>
-                <MessageContent
-                  ref={contentRef}
-                  elements={elements}
-                  message={step}
-                  allowHtml={allowHtml}
-                  latex={latex}
-                  sections={showInputSection ? ['output'] : undefined}
-                />
+                <div className="pr-8">
+                  <MessageContent
+                    ref={contentRef}
+                    elements={elements}
+                    message={step}
+                    allowHtml={allowHtml}
+                    latex={latex}
+                    sections={showInputSection ? ['output'] : undefined}
+                  />
+                </div>
 
                 {editable ? (
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="absolute top-1 right-1 invisible group-hover:visible"
+                    className="absolute top-1 right-1 invisible group-hover:visible z-10"
                     onClick={() => {
                       setDraftOutput(step.output || '');
                       setIsEditingOutput(true);
@@ -278,7 +282,12 @@ const StepMessage = memo(function StepMessage({
           </div>
         ) : null}
 
-        <MessageButtons message={step} actions={actions} contentRef={contentRef} />
+        <MessageButtons
+          message={step}
+          actions={actions}
+          run={step}
+          contentRef={contentRef}
+        />
       </Step>
     </div>
   );
