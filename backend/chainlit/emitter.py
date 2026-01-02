@@ -408,10 +408,12 @@ class ChainlitEmitter(BaseChainlitEmitter):
         """
         Send a task start signal to the UI.
         """
+        logger.debug(f"[TASK] task_start: session_id={self.session.id}, socket_id={self.session.socket_id}")
         return self.emit("task_start", {})
 
     def task_end(self):
         """Send a task end signal to the UI."""
+        logger.debug(f"[TASK] task_end: session_id={self.session.id}, socket_id={self.session.socket_id}")
         return self.emit("task_end", {})
 
     def stream_start(self, step_dict: StepDict):

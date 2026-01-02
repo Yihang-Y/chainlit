@@ -7,6 +7,7 @@ import {
 } from '@chainlit/react-client';
 
 import { RefreshCw } from 'lucide-react';
+import { useContext } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/tooltip';
 
 import CopyButton from '@/components/CopyButton';
+import { MessageContext } from '@/contexts/MessageContext';
 
 import MessageActions from './Actions';
 import { DebugButton } from './DebugButton';
@@ -32,6 +34,7 @@ const MessageButtons = ({ message, actions, run, contentRef }: Props) => {
   const { config } = useConfig();
   const { firstInteraction } = useChatMessages();
   const { regenerateMessage } = useChatInteract();
+  const { loading, askUser } = useContext(MessageContext);
 
   const isUser = message.type === 'user_message';
   const isAsk = message.waitForAnswer;
@@ -52,6 +55,9 @@ const MessageButtons = ({ message, actions, run, contentRef }: Props) => {
     return null;
   }
 
+  // Disable regenerate button when loading or asking user (similar to UserMessage)
+  // const disabled = loading;
+
   const handleRegenerate = () => {
     regenerateMessage(message);
   };
@@ -67,6 +73,7 @@ const MessageButtons = ({ message, actions, run, contentRef }: Props) => {
                 size="icon"
                 onClick={handleRegenerate}
                 className="text-muted-foreground"
+                disabled={false}
               >
                 <RefreshCw className="h-4 w-4" />
               </Button>

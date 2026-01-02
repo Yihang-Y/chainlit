@@ -95,6 +95,21 @@ const useChatInteract = () => {
     [session?.socket]
   );
 
+  const switchBranch = useCallback(
+    (branchId: string) => {
+      return new Promise<{ success: boolean; branch_id?: string; error?: string }>((resolve) => {
+        if (!session?.socket) {
+          resolve({ success: false, error: 'No socket connection' });
+          return;
+        }
+        session.socket.emit('switch_branch', { branch_id: branchId }, (response: any) => {
+          resolve(response || { success: false, error: 'No response' });
+        });
+      });
+    },
+    [session?.socket]
+  );
+
   const windowMessage = useCallback(
     (data: any) => {
       session?.socket.emit('window_message', data);
@@ -153,7 +168,7 @@ const useChatInteract = () => {
       })
     );
 
-    setLoading(false);
+    setLoading(0);
 
     session?.socket.emit('stop');
   }, [session?.socket]);
@@ -172,6 +187,7 @@ const useChatInteract = () => {
     sendMessage,
     editMessage,
     regenerateMessage,
+    switchBranch,
     windowMessage,
     startAudioStream,
     sendAudioChunk,
@@ -183,3 +199,4 @@ const useChatInteract = () => {
 };
 
 export { useChatInteract };
+

@@ -49,18 +49,31 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
         }
 
         if with_task:
+            func_name = getattr(user_function, '__name__', 'unknown')
+            logger.info(f"[WRAP_FUNC] task_start for {func_name}, session_id={context.session.id}")
             await context.emitter.task_start()
 
         try:
             # Call the user-defined function with the arguments
+            func_name = getattr(user_function, '__name__', 'unknown')
+            logger.info(f"[WRAP_FUNC] Calling {func_name}, session_id={context.session.id}")
             if inspect.iscoroutinefunction(user_function):
-                return await user_function(**params_values)
+                result = await user_function(**params_values)
             else:
-                return user_function(**params_values)
+                result = user_function(**params_values)
+            logger.info(f"[WRAP_FUNC] {func_name} completed, session_id={context.session.id}")
+            
+            # Note: We don't set has_first_interaction or send first_interaction here
+            # Let the first real user message trigger init_thread/flush/name via process_message
+            
+            return result
         except CancelledError:
+            func_name = getattr(user_function, '__name__', 'unknown')
+            logger.info(f"[WRAP_FUNC] {func_name} cancelled, session_id={context.session.id}")
             pass
         except Exception as e:
-            logger.exception(e)
+            func_name = getattr(user_function, '__name__', 'unknown')
+            logger.exception(f"[WRAP_FUNC] Error in {func_name}, session_id={context.session.id}: {e}")
             if with_task:
                 from chainlit.message import ErrorMessage
 
@@ -69,6 +82,8 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
                 ).send()
         finally:
             if with_task:
+                func_name = getattr(user_function, '__name__', 'unknown')
+                logger.info(f"[WRAP_FUNC] task_end for {func_name}, session_id={context.session.id}")
                 await context.emitter.task_end()
 
     return wrapper

@@ -135,8 +135,13 @@ const useChatSession = () => {
       });
 
       socket.on('connect', () => {
+        console.log('[SOCKET] Connected, emitting connection_successful');
         socket.emit('connection_successful');
         setSession((s) => ({ ...s!, error: false }));
+        // Reset loading counter on new connection to ensure clean state
+        // This prevents state inheritance from previous connections
+        setLoading(0);
+        console.log('[LOADING] Connection established, reset counter to 0');
         setMcps((prev) =>
           prev.map((mcp) => {
             let promise;
@@ -194,11 +199,19 @@ const useChatSession = () => {
       });
 
       socket.on('task_start', () => {
-        setLoading(true);
+        setLoading((prev) => {
+          const next = prev + 1;
+          console.log('[LOADING] task_start, counter:', prev, '->', next);
+          return next;
+        });
       });
 
       socket.on('task_end', () => {
-        setLoading(false);
+        setLoading((prev) => {
+          const next = Math.max(0, prev - 1);
+          console.log('[LOADING] task_end, counter:', prev, '->', next);
+          return next;
+        });
       });
 
       socket.on('reload', () => {
@@ -240,15 +253,32 @@ const useChatSession = () => {
       socket.on('audio_interrupt', () => {
         wavStreamPlayer.interrupt();
       });
+      socket.onAny((event, ...args) => {
+        console.log('[WS EVENT]', event, args)
+      })
 
       socket.on('resume_thread', (thread: IThread) => {
         const isReadOnlyView = Boolean((thread as any)?.metadata?.viewer_read_only);
+        console.log('[RESUME_THREAD] Event received:', {
+          threadId: thread.id,
+          isReadOnlyView,
+          idToResume,
+          currentThreadId
+        });
+        
         if (!isReadOnlyView && idToResume && thread.id !== idToResume) {
+          console.log('[RESUME_THREAD] Thread ID mismatch, redirecting');
           window.location.href = `/thread/${thread.id}`;
         }
-        if (!isReadOnlyView && idToResume) {
+        
+        // Always set currentThreadId for non-read-only threads, regardless of idToResume
+        // This ensures Thread.tsx can correctly determine isCurrentThread even if
+        // resume_thread arrives before AutoResumeThread sets idToResume
+        if (!isReadOnlyView) {
+          console.log('[RESUME_THREAD] Setting currentThreadId:', thread.id);
           setCurrentThreadId(thread.id);
         }
+        
         let messages: IStep[] = [];
         for (const step of thread.steps) {
           messages = addMessage(messages, step);
@@ -269,6 +299,13 @@ const useChatSession = () => {
             (e) => ['avatar', 'tasklist'].indexOf(e.type) === -1
           )
         );
+      });
+
+      socket.on('branch_switched', (data: { branch_id: string; thread_id: string }) => {
+        // Branch switch is handled by backend automatically via resume_thread event
+        // The backend will emit resume_thread event after switching branch
+        // Frontend components listening to this event will update their UI
+        console.log(`Branch switched to ${data.branch_id} for thread ${data.thread_id}`);
       });
 
       socket.on('resume_thread_error', (error?: string) => {
@@ -321,13 +358,14 @@ const useChatSession = () => {
       socket.on('ask', ({ msg, spec }, callback) => {
         setAskUser({ spec, callback, parentId: msg.parentId });
         setMessages((oldMessages) => addMessage(oldMessages, msg));
-
-        setLoading(false);
+        // Clear loading when asking user (user interaction required)
+        setLoading(0);
       });
 
       socket.on('ask_timeout', () => {
         setAskUser(undefined);
-        setLoading(false);
+        // Clear loading on timeout
+        setLoading(0);
       });
 
       socket.on('clear_ask', () => {
@@ -463,6 +501,13 @@ const useChatSession = () => {
           default:
             toast(data.message);
             break;
+        }
+      });
+      socket.on('branch_switched', async (data: { branch_id: string; thread_id: string }) => {
+        // When branch is switched, reload the thread to get messages for the new branch
+        if (data.thread_id && currentThreadId === data.thread_id) {
+          // Trigger thread resume to reload messages for the new branch
+          socket.emit('resume_thread', { threadId: data.thread_id });
         }
       });
     },

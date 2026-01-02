@@ -8,6 +8,7 @@ import ButtonLink from '@/components/ButtonLink';
 import { useSidebar } from '@/components/ui/sidebar';
 
 import ApiKeys from './ApiKeys';
+import BranchSwitcher from './BranchSwitcher';
 import ChatProfiles from './ChatProfiles';
 import NewChatButton from './NewChat';
 import ReadmeButton from './Readme';
@@ -61,6 +62,7 @@ const Header = memo(() => {
 
       <div />
       <div className="flex items-center gap-1">
+        <BranchSwitcher />
         <ShareButton />
         <ReadmeButton />
         <ApiKeys />

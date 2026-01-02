@@ -30,6 +30,37 @@ from chainlit.types import (
 from chainlit.utils import utc_now
 
 
+async def _get_current_branch_id(thread_id: str) -> str:
+    """Get current branch_id from thread metadata."""
+    import json
+    data_layer = get_data_layer()
+    if not data_layer or not thread_id:
+        return "main"
+    
+    try:
+        thread = await data_layer.get_thread(thread_id)
+        if not thread or not isinstance(thread, dict):
+            return "main"
+        
+        thread_metadata = thread.get("metadata", {})
+        if not thread_metadata:
+            return "main"
+            
+        if isinstance(thread_metadata, str):
+            try:
+                thread_metadata = json.loads(thread_metadata)
+            except:
+                return "main"
+        
+        if not isinstance(thread_metadata, dict):
+            return "main"
+        
+        return thread_metadata.get("current_branch_id", "main")
+    except Exception as e:
+        logger.warning(f"Failed to get current branch_id: {e}")
+        return "main"
+
+
 class MessageBase(ABC):
     id: str
     thread_id: str
@@ -142,6 +173,15 @@ class MessageBase(ABC):
         return True
 
     async def _create(self):
+        # Ensure branch_id is set in metadata before creating
+        print(f"setting branch_id in message metadata for message {self.id} with {self.to_dict()}")
+        if not self.metadata:
+            self.metadata = {}
+        
+        if "branch_id" not in self.metadata and self.thread_id:
+            branch_id = await _get_current_branch_id(self.thread_id)
+            self.metadata["branch_id"] = branch_id
+        
         step_dict = self.to_dict()
         data_layer = get_data_layer()
         if data_layer and not self.persisted:

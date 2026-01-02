@@ -37,7 +37,7 @@ const useChatData = () => {
   const connected = session?.socket.connected && !session?.error;
   const disabled =
     !connected ||
-    loading ||
+    loading > 0 ||
     askUser?.spec.type === 'file' ||
     askUser?.spec.type === 'action' ||
     askUser?.spec.type === 'element';
@@ -53,7 +53,7 @@ const useChatData = () => {
     disabled,
     elements,
     error: session?.error,
-    loading,
+    loading: loading > 0,
     tasklists
   };
 };

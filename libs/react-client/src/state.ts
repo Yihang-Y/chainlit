@@ -80,9 +80,9 @@ export const tokenCountState = atom<number>({
   default: 0
 });
 
-export const loadingState = atom<boolean>({
+export const loadingState = atom<number>({
   key: 'Loading',
-  default: false
+  default: 0
 });
 
 export const askUserState = atom<IAsk | undefined>({

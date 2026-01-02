@@ -19,6 +19,37 @@ from chainlit.types import FeedbackDict
 from chainlit.utils import utc_now
 
 
+async def _get_current_branch_id(thread_id: str) -> str:
+    """Get current branch_id from thread metadata."""
+    data_layer = get_data_layer()
+    print(f"Getting current branch_id for thread {thread_id}")
+    if not data_layer or not thread_id:
+        return "main"
+    
+    try:
+        thread = await data_layer.get_thread(thread_id)
+        if not thread or not isinstance(thread, dict):
+            return "main"
+        
+        thread_metadata = thread.get("metadata", {})
+        if not thread_metadata:
+            return "main"
+            
+        if isinstance(thread_metadata, str):
+            try:
+                thread_metadata = json.loads(thread_metadata)
+            except:
+                return "main"
+        
+        if not isinstance(thread_metadata, dict):
+            return "main"
+        
+        return thread_metadata.get("current_branch_id", "main")
+    except Exception as e:
+        logger.warning(f"Failed to get current branch_id: {e}")
+        return "main"
+
+
 def check_add_step_in_cot(step: "Step"):
     is_message = step.type in [
         "user_message",
@@ -208,6 +239,7 @@ class Step:
         self.type = type
         self.id = id or str(uuid.uuid4())
         self.metadata = metadata or {}
+        # branch_id will be set automatically in send() method if not already set
         self.tags = tags
         self.is_error = False
         self.show_input = show_input
@@ -360,6 +392,20 @@ class Step:
         if self.persisted:
             return self
 
+        # Ensure branch_id is set before sending
+        if "branch_id" not in self.metadata and self.thread_id:
+            if hasattr(self, "_pending_branch_id") and self._pending_branch_id:
+                print(f"Using pending branch_id: {self._pending_branch_id}")
+                try:
+                    branch_id = await self._pending_branch_id
+                    self.metadata["branch_id"] = branch_id
+                except Exception as e:
+                    logger.warning(f"Failed to get branch_id: {e}")
+                    self.metadata["branch_id"] = "main"
+            elif "branch_id" not in self.metadata:
+                branch_id = await _get_current_branch_id(self.thread_id)
+                self.metadata["branch_id"] = branch_id
+        print(f"Branch ID: {self.metadata.get('branch_id')} for step {self.id} with {self.to_dict()}")
         if config.code.author_rename:
             self.name = await config.code.author_rename(self.name)
 
